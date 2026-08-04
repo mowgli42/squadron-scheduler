@@ -37,9 +37,16 @@ Ponytail rule: each bead is the smallest shippable slice. No extras.
 - Done when: board renders live data from API
 
 ### B7 — Inline assignment controls ✅
-- Dropdowns on the board for tail / loadout / crew
+- Dropdowns on the board for tail / loadout / crew / status
 - Call the PATCH/POST endpoints
 - Done when: change appears without page reload
+
+### B8 — Demo build-up + tests ✅
+- `sample_data.py` four-ship morning go + stages 01–06
+- `POST /demo/stages/{id}` + Demo buttons in UI
+- `test_buildup.py` covers seed, each stage, conflicts
+- Screenshot series under `docs/images/demo/`
+- Done when: unittest green and README shows 01→06 shots
 
 ## Remaining (from @wip Gherkin)
 

@@ -5,6 +5,10 @@
   let aircraft = $state([])
   let aircrew = $state([])
   let error = $state('')
+  let demoStages = $state([])
+  let demoNote = $state('')
+
+  const STATUSES = ['planned', 'crew-ready', 'airborne']
 
   const api = (path, opts) => fetch('/api' + path, opts).then(r => {
     if (!r.ok) return r.json().then(e => Promise.reject(e.detail || r.statusText))
@@ -18,6 +22,10 @@
         api('/sorties'), api('/aircraft'), api('/aircrew')
       ])
     } catch (e) { error = String(e) }
+  }
+
+  async function loadDemoMeta() {
+    try { demoStages = await api('/demo/stages') } catch { /* demo optional */ }
   }
 
   async function setTail(sid, tail) {
@@ -56,18 +64,53 @@
     } catch (e) { error = String(e) }
   }
 
+  async function setStatus(sid, status) {
+    if (!status) return
+    try {
+      await api(`/sorties/${sid}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status })
+      })
+      await load()
+    } catch (e) { error = String(e) }
+  }
+
+  async function applyDemo(stageId) {
+    error = ''
+    try {
+      const r = await api(`/demo/stages/${stageId}`, { method: 'POST' })
+      demoNote = r.title
+      await load()
+    } catch (e) { error = String(e) }
+  }
+
   function crewName(s, pos) {
     return s.crew?.find(c => c.position === pos)?.name || '—'
   }
 
-  onMount(load)
+  onMount(() => { load(); loadDemoMeta() })
 </script>
 
 <main>
   <header>
-    <h1>Squadron Schedule</h1>
+    <div>
+      <h1>Squadron Schedule</h1>
+      {#if demoNote}
+        <p class="demo-note">{demoNote}</p>
+      {/if}
+    </div>
     <button onclick={load}>Refresh</button>
   </header>
+
+  {#if demoStages.length}
+    <nav class="demo" aria-label="Demo build-up stages">
+      <span class="demo-label">Demo</span>
+      {#each demoStages as d}
+        <button type="button" onclick={() => applyDemo(d.id)}>{d.id.slice(0, 2)}</button>
+      {/each}
+    </nav>
+  {/if}
 
   {#if error}
     <p class="err">{error}</p>
@@ -87,7 +130,7 @@
     </thead>
     <tbody>
       {#each sorties as s}
-        <tr>
+        <tr class:airborne={s.status === 'airborne'} class:ready={s.status === 'crew-ready'}>
           <td>{s.takeoff?.slice(11, 16) || '—'}</td>
           <td>{s.mission}</td>
           <td>
@@ -123,7 +166,13 @@
               {/each}
             </select>
           </td>
-          <td>{s.status}</td>
+          <td>
+            <select value={s.status || 'planned'} onchange={e => setStatus(s.id, e.target.value)}>
+              {#each STATUSES as st}
+                <option value={st}>{st}</option>
+              {/each}
+            </select>
+          </td>
         </tr>
       {/each}
     </tbody>

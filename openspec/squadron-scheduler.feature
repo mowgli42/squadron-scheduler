@@ -40,6 +40,18 @@ Feature: Squadron Flying Schedule
     When I attempt to assign them again
     Then the system rejects the assignment with a clear conflict message
 
+  Scenario: Advance status to crew-ready and airborne
+    Given a sortie with aircraft, loadout, and full crew
+    When I set status to "crew-ready"
+    Then the board shows crew-ready
+    When I set status to "airborne"
+    Then the board shows airborne
+
+  Scenario: Demo build-up stages
+    Given the sample four-ship morning go
+    When I apply demo stages 01 through 06 in order
+    Then the board progresses from empty assignments to lead elements airborne
+
   @wip
   Scenario: Block on rest or currency
     Given aircrew with insufficient rest or expired currency
