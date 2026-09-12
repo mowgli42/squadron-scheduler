@@ -1,60 +1,35 @@
-# Beads — Squadron Scheduler Prototype
+# Beads — Squadron Scheduler
 
-Atomic units derived from openspec/squadron-scheduler.feature.
-Ponytail rule: each bead is the smallest shippable slice. No extras.
+## Done (prototype)
 
-## Done
+- B1–B8 — 1.0 data model, APIs, board, demo 01–06, tests
+- B9 — Derived process stages (planned → tail → loadout → crewed → crew-ready → airborne)
+- B10 — GET /metrics + executable % as primary decision metric
+- B11 — IxDF 2.0 layout: question, metric band, process funnel, exceptions, board
+- B12 — metrics.py unit tests + stage assertions on demo buildup
 
-### B1 — Core data model (SQLite) ✅
-- Tables: aircraft, aircrew, sorties, assignments
-- Seed 3–5 example rows
-- Done when: schema exists and seeds load without error
+## Production rebuild (do not implement in the prototype)
 
-### B2 — FastAPI read endpoints ✅
-- GET /aircraft, /aircrew, /sorties
-- Return JSON only
-- Done when: curl returns seeded data
+### P1 — Durable multi-user store
+Replace single SQLite file with a real DB and concurrent writers.
 
-### B3 — Assign aircraft ✅
-- PATCH /sorties/{id}/aircraft {tail}
-- Validate availability window (simple same-day overlap check)
-- Done when: assignment persists and conflicts return 409
+### P2 — Explicit process state machine
+Stop deriving stage. Store legal transitions and who moved the line.
 
-### B4 — Apply loadout ✅
-- PATCH /sorties/{id}/loadout {template}
-- Templates stored as simple dict in code
-- Done when: loadout fields update
+### P3 — Auth + squadron tenancy
+CAC / Platform One identity. One unit's schedule is not another unit's.
 
-### B5 — Assign crew ✅
-- POST /sorties/{id}/crew {position, aircrew_id}
-- Block on same-day overlap (minimal rules; rest/currency still @wip)
-- Done when: assignment works or returns clear 409
+### P4 — Live Ops–MX feed
+Aircraft MC/PMC and configuration from the maintenance system of record.
 
-### B6 — Svelte board (light grey IxDF) ✅
-- Single App.svelte showing list of sorties
-- Columns: time | mission | tail | loadout | pilot | wso | status
-- Light grey background, high-contrast text, minimal chrome
-- Done when: board renders live data from API
+### P5 — Currency / rest engine
+RAP events, FDP, crew rest. Block assign with the actual rule, not same-day only.
 
-### B7 — Inline assignment controls ✅
-- Dropdowns on the board for tail / loadout / crew / status
-- Call the PATCH/POST endpoints
-- Done when: change appears without page reload
+### P6 — Pen-and-ink audit
+Every tail swap and crew change is a dated event, exportable.
 
-### B8 — Demo build-up + tests ✅
-- `sample_data.py` four-ship morning go + stages 01–06
-- `POST /demo/stages/{id}` + Demo buttons in UI
-- `test_buildup.py` covers seed, each stage, conflicts
-- Screenshot series under `docs/images/demo/`
-- Done when: unittest green and README shows 01→06 shots
+### P7 — Observability
+Structured logs and a readiness snapshot that a commander can trust.
 
-## Remaining (from @wip Gherkin)
-
-- Rest / currency conflict checks on crew assign
-- Load-crew estimate on board
-- Crew-ready / Exceptional Release workflow
-- Pen-and-ink change log
-
-## Out of scope (YAGNI)
-
-Auth, multi-user real-time, AI optimizer, full RAP currency engine, munitions inventory, AF Form 2407 PDF, mobile PWA, Docker, production deploy until asked.
+### P8 — Hosted demo
+Vercel (or equivalent) front door plus a hosted API so the desk works off-box.
