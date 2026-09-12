@@ -1,4 +1,8 @@
-"""Squadron Scheduler API — minimal FastAPI + SQLite."""
+"""Squadron Scheduler API — FastAPI + SQLite.
+
+2.0 adds derived process stages and a /metrics snapshot.
+Storage is unchanged so demo stages 01–06 stay valid.
+"""
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -16,6 +20,7 @@ from sample_data import (
     STATUSES,
     sortie_takeoffs,
 )
+from metrics import annotate, summarize
 
 DB = Path(os.environ.get("SQUADRON_DB", Path(__file__).parent / "squadron.db"))
 app = FastAPI(title="Squadron Scheduler")
@@ -123,6 +128,23 @@ def apply_demo_stage(stage_id: str):
     return stage
 
 
+def _sorties_with_crew(c):
+    rows = c.execute("SELECT * FROM sorties ORDER BY takeoff").fetchall()
+    out = []
+    for r in rows:
+        s = dict(r)
+        s["crew"] = [
+            dict(a)
+            for a in c.execute(
+                "SELECT a.position, ac.name, ac.id as aircrew_id FROM assignments a "
+                "JOIN aircrew ac ON a.aircrew_id=ac.id WHERE a.sortie_id=?",
+                (r["id"],),
+            )
+        ]
+        out.append(annotate(s))
+    return out
+
+
 init()
 
 
@@ -158,20 +180,15 @@ def list_aircrew():
 @app.get("/sorties")
 def list_sorties():
     with db() as c:
-        rows = c.execute("SELECT * FROM sorties ORDER BY takeoff").fetchall()
-        out = []
-        for r in rows:
-            s = dict(r)
-            s["crew"] = [
-                dict(a)
-                for a in c.execute(
-                    "SELECT a.position, ac.name, ac.id as aircrew_id FROM assignments a "
-                    "JOIN aircrew ac ON a.aircrew_id=ac.id WHERE a.sortie_id=?",
-                    (r["id"],),
-                )
-            ]
-            out.append(s)
-        return out
+        return _sorties_with_crew(c)
+
+
+@app.get("/metrics")
+def get_metrics():
+    with db() as c:
+        sorties = _sorties_with_crew(c)
+        aircraft = [dict(r) for r in c.execute("SELECT * FROM aircraft")]
+    return summarize(sorties, aircraft)
 
 
 @app.get("/demo/stages")
