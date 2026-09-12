@@ -1,12 +1,15 @@
 <script>
   import { onMount } from 'svelte'
+  import { STAGE_ORDER, STAGE_LABELS, summarize } from './metrics.js'
 
   let sorties = $state([])
   let aircraft = $state([])
   let aircrew = $state([])
+  let metrics = $state(null)
   let error = $state('')
   let demoStages = $state([])
   let demoNote = $state('')
+  let live = $state(false)
 
   const STATUSES = ['planned', 'crew-ready', 'airborne']
 
@@ -18,10 +21,18 @@
   async function load() {
     error = ''
     try {
-      ;[sorties, aircraft, aircrew] = await Promise.all([
-        api('/sorties'), api('/aircraft'), api('/aircrew')
+      const [s, a, c, m] = await Promise.all([
+        api('/sorties'), api('/aircraft'), api('/aircrew'), api('/metrics')
       ])
-    } catch (e) { error = String(e) }
+      live = true
+      sorties = s
+      aircraft = a
+      aircrew = c
+      metrics = m || summarize(s, a)
+    } catch (e) {
+      live = false
+      error = String(e)
+    }
   }
 
   async function loadDemoMeta() {
@@ -89,92 +100,167 @@
     return s.crew?.find(c => c.position === pos)?.name || '—'
   }
 
+  function timeOf(s) {
+    return s.takeoff?.slice(11, 16) || '—'
+  }
+
   onMount(() => { load(); loadDemoMeta() })
 </script>
 
 <main>
-  <header>
+  <header class="top">
     <div>
-      <h1>Squadron Schedule</h1>
-      {#if demoNote}
-        <p class="demo-note">{demoNote}</p>
-      {/if}
+      <p class="eyebrow">Flying schedule · four-ship morning go</p>
+      <h1>Can we generate today’s go?</h1>
+      <p class="lede">
+        Process first, then numbers, then the board.
+        {#if metrics}
+          Next action: <strong>{metrics.next_action}</strong>.
+        {/if}
+      </p>
     </div>
-    <button onclick={load}>Refresh</button>
+    <div class="top-actions">
+      <span class="pulse" class:on={live}>{live ? 'Live API' : 'No API'}</span>
+      <button onclick={load}>Refresh</button>
+    </div>
   </header>
 
   {#if demoStages.length}
     <nav class="demo" aria-label="Demo build-up stages">
-      <span class="demo-label">Demo</span>
+      <span class="demo-label">Replay process</span>
       {#each demoStages as d}
         <button type="button" onclick={() => applyDemo(d.id)}>{d.id.slice(0, 2)}</button>
       {/each}
+      {#if demoNote}
+        <span class="demo-note">{demoNote}</span>
+      {/if}
     </nav>
   {/if}
 
   {#if error}
-    <p class="err">{error}</p>
+    <p class="err" role="alert">{error}</p>
   {/if}
 
-  <table>
-    <thead>
-      <tr>
-        <th>Takeoff</th>
-        <th>Mission</th>
-        <th>Tail</th>
-        <th>Loadout</th>
-        <th>Pilot</th>
-        <th>WSO</th>
-        <th>Status</th>
-      </tr>
-    </thead>
-    <tbody>
-      {#each sorties as s}
-        <tr class:airborne={s.status === 'airborne'} class:ready={s.status === 'crew-ready'}>
-          <td>{s.takeoff?.slice(11, 16) || '—'}</td>
-          <td>{s.mission}</td>
-          <td>
-            <select value={s.tail || ''} onchange={e => setTail(s.id, e.target.value)}>
-              <option value="">—</option>
-              {#each aircraft as a}
-                <option value={a.tail}>{a.tail} ({a.status})</option>
-              {/each}
-            </select>
-          </td>
-          <td>
-            <select value="" onchange={e => setLoadout(s.id, e.target.value)}>
-              <option value="">{s.loadout ? s.loadout.slice(0, 18) + '…' : 'set…'}</option>
-              <option value="A/A">A/A</option>
-              <option value="A/G">A/G</option>
-              <option value="SEAD">SEAD</option>
-              <option value="clean">clean</option>
-            </select>
-          </td>
-          <td>
-            <select value="" onchange={e => setCrew(s.id, 'pilot', e.target.value)}>
-              <option value="">{crewName(s, 'pilot')}</option>
-              {#each aircrew.filter(c => c.role === 'pilot') as c}
-                <option value={c.id}>{c.name}</option>
-              {/each}
-            </select>
-          </td>
-          <td>
-            <select value="" onchange={e => setCrew(s.id, 'wso', e.target.value)}>
-              <option value="">{crewName(s, 'wso')}</option>
-              {#each aircrew.filter(c => c.role === 'wso') as c}
-                <option value={c.id}>{c.name}</option>
-              {/each}
-            </select>
-          </td>
-          <td>
-            <select value={s.status || 'planned'} onchange={e => setStatus(s.id, e.target.value)}>
-              {#each STATUSES as st}
-                <option value={st}>{st}</option>
-              {/each}
-            </select>
-          </td>
+  {#if metrics}
+    <section class="metrics" aria-label="Readiness metrics">
+      <article class="metric primary">
+        <p class="metric-label">Executable</p>
+        <p class="metric-value">{metrics.executable_pct}<span>%</span></p>
+        <p class="metric-sub">{metrics.executable} of {metrics.sorties_total} lines crew-ready or airborne</p>
+      </article>
+      <article class="metric">
+        <p class="metric-label">Tails</p>
+        <p class="metric-value">{metrics.tails_assigned}<span>/{metrics.sorties_total}</span></p>
+        <p class="metric-sub">{metrics.aircraft_available} MC/PMC of {metrics.aircraft_total}</p>
+      </article>
+      <article class="metric">
+        <p class="metric-label">Loadouts</p>
+        <p class="metric-value">{metrics.loadouts_applied}<span>/{metrics.sorties_total}</span></p>
+        <p class="metric-sub">templates applied</p>
+      </article>
+      <article class="metric">
+        <p class="metric-label">Crew</p>
+        <p class="metric-value">{metrics.crew_complete}<span>/{metrics.sorties_total}</span></p>
+        <p class="metric-sub">pilot + WSO filled</p>
+      </article>
+      <article class="metric">
+        <p class="metric-label">Airborne</p>
+        <p class="metric-value">{metrics.airborne}</p>
+        <p class="metric-sub">already launched</p>
+      </article>
+    </section>
+
+    <section class="funnel" aria-label="Generation process">
+      <h2>Generation process</h2>
+      <ol>
+        {#each STAGE_ORDER as key}
+          <li class:hot={metrics.funnel[key] > 0}>
+            <span class="count">{metrics.funnel[key]}</span>
+            <span class="label">{STAGE_LABELS[key]}</span>
+          </li>
+        {/each}
+      </ol>
+    </section>
+
+    {#if metrics.exceptions?.length}
+      <section class="exceptions" aria-label="Exceptions">
+        <h2>Exceptions — fix these first</h2>
+        <ul>
+          {#each metrics.exceptions as ex}
+            <li>
+              <span class="when">{ex.takeoff?.slice(11, 16)} {ex.mission}</span>
+              <span class="gap">{ex.blockers.join(' · ')}</span>
+            </li>
+          {/each}
+        </ul>
+      </section>
+    {/if}
+  {/if}
+
+  <section class="board">
+    <h2>Schedule board</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Stage</th>
+          <th>Takeoff</th>
+          <th>Mission</th>
+          <th>Tail</th>
+          <th>Loadout</th>
+          <th>Pilot</th>
+          <th>WSO</th>
+          <th>Status</th>
         </tr>
-      {/each}
-    </tbody>
-  </table>
+      </thead>
+      <tbody>
+        {#each sorties as s}
+          <tr class:airborne={s.status === 'airborne'} class:ready={s.status === 'crew-ready'} class:blocked={s.blockers?.length && s.status === 'planned'}>
+            <td><span class="stage stage-{s.stage}">{STAGE_LABELS[s.stage] || s.stage || '—'}</span></td>
+            <td>{timeOf(s)}</td>
+            <td>{s.mission}</td>
+            <td>
+              <select value={s.tail || ''} onchange={e => setTail(s.id, e.target.value)}>
+                <option value="">—</option>
+                {#each aircraft as a}
+                  <option value={a.tail}>{a.tail} ({a.status})</option>
+                {/each}
+              </select>
+            </td>
+            <td>
+              <select value="" onchange={e => setLoadout(s.id, e.target.value)}>
+                <option value="">{s.loadout ? s.loadout.slice(0, 18) + '…' : 'set…'}</option>
+                <option value="A/A">A/A</option>
+                <option value="A/G">A/G</option>
+                <option value="SEAD">SEAD</option>
+                <option value="clean">clean</option>
+              </select>
+            </td>
+            <td>
+              <select value="" onchange={e => setCrew(s.id, 'pilot', e.target.value)}>
+                <option value="">{crewName(s, 'pilot')}</option>
+                {#each aircrew.filter(c => c.role === 'pilot') as c}
+                  <option value={c.id}>{c.name}</option>
+                {/each}
+              </select>
+            </td>
+            <td>
+              <select value="" onchange={e => setCrew(s.id, 'wso', e.target.value)}>
+                <option value="">{crewName(s, 'wso')}</option>
+                {#each aircrew.filter(c => c.role === 'wso') as c}
+                  <option value={c.id}>{c.name}</option>
+                {/each}
+              </select>
+            </td>
+            <td>
+              <select value={s.status || 'planned'} onchange={e => setStatus(s.id, e.target.value)}>
+                {#each STATUSES as st}
+                  <option value={st}>{st}</option>
+                {/each}
+              </select>
+            </td>
+          </tr>
+        {/each}
+      </tbody>
+    </table>
+  </section>
 </main>
