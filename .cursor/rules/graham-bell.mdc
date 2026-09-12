@@ -1,0 +1,13 @@
+---
+description: Graham Bell learning-prototype mode for this repo
+globs: ["**/*"]
+alwaysApply: true
+---
+
+This repo is still a learning prototype. Prefer graham-bell over ponytail
+until a production rebuild starts.
+
+- Leave working demo paths, tests, OpenSpec, and beads behind.
+- Be explicit about trade-offs.
+- Do not pretend derived process stages are a production state machine.
+- Clarity beats compression on the dashboard.
