@@ -1,35 +1,49 @@
 # Beads — Squadron Scheduler
 
-## Done (prototype)
+## Workflow
 
-- B1–B8 — 1.0 data model, APIs, board, demo 01–06, tests
-- B9 — Derived process stages (planned → tail → loadout → crewed → crew-ready → airborne)
-- B10 — GET /metrics + executable % as primary decision metric
-- B11 — IxDF 2.0 layout: question, metric band, process funnel, exceptions, board
-- B12 — metrics.py unit tests + stage assertions on demo buildup
+```bash
+./scripts/beads-setup.sh   # once
+bd ready
+bd update <id> --status in_progress
+# implement + tests
+bd close <id>
+```
+
+See `openspec/WORKFLOW.md` and `docs/CRITICAL-REVIEW.md`.
+
+## Prototype gap-close (this branch)
+
+| Bead | Capability | Status |
+| --- | --- | --- |
+| A1 Land + turn conflicts | aircraft-assignment | Done |
+| A2 Spare tail | aircraft-assignment | Done |
+| A3 Config mismatch | aircraft-assignment | Done |
+| A4 Aircraft day board | aircraft-day-board | Done |
+| A5 Line + callsign | flying-schedule | Done |
+| A6 Load-crew minutes | loadout-and-mx | Done |
+| A7 Rest gate | crew-assignment | Done |
+| A8 Pen-and-ink log | pen-and-ink | Done |
+| A9 ER before crew-ready | loadout-and-mx | Done |
+| A10 Crew replace | crew-assignment | Done |
+| A11 Richer metrics | readiness-metrics | Done |
+| A12 Demo 01–06 + spare/ER | demo-buildup | Done |
+| A13 Frontend board updates | flying-schedule | Done |
+
+## Earlier prototype (still done)
+
+- B1–B8 — 1.0 data model, APIs, board, demo, tests
+- B9–B12 — derived stages, `/metrics`, IxDF 2.0 layout, stage assertions
 
 ## Production rebuild (do not implement in the prototype)
 
-### P1 — Durable multi-user store
-Replace single SQLite file with a real DB and concurrent writers.
+| Bead | Topic |
+| --- | --- |
+| P1 | Durable multi-user store |
+| P2 | Explicit process state machine |
+| P3 | Auth + squadron tenancy |
+| P4 | Live Ops–MX feed |
+| P5 | Full RAP / currency engine |
+| P6 | Hosted demo |
 
-### P2 — Explicit process state machine
-Stop deriving stage. Store legal transitions and who moved the line.
-
-### P3 — Auth + squadron tenancy
-CAC / Platform One identity. One unit's schedule is not another unit's.
-
-### P4 — Live Ops–MX feed
-Aircraft MC/PMC and configuration from the maintenance system of record.
-
-### P5 — Currency / rest engine
-RAP events, FDP, crew rest. Block assign with the actual rule, not same-day only.
-
-### P6 — Pen-and-ink audit
-Every tail swap and crew change is a dated event, exportable.
-
-### P7 — Observability
-Structured logs and a readiness snapshot that a commander can trust.
-
-### P8 — Hosted demo
-Vercel (or equivalent) front door plus a hosted API so the desk works off-box.
+Machine tracking: `.beads/` via `bd`.

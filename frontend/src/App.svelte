@@ -5,6 +5,8 @@
   let sorties = $state([])
   let aircraft = $state([])
   let aircrew = $state([])
+  let schedule = $state([])
+  let changes = $state([])
   let metrics = $state(null)
   let error = $state('')
   let demoStages = $state([])
@@ -13,21 +15,29 @@
 
   const STATUSES = ['planned', 'crew-ready', 'airborne']
 
-  const api = (path, opts) => fetch('/api' + path, opts).then(r => {
-    if (!r.ok) return r.json().then(e => Promise.reject(e.detail || r.statusText))
-    return r.json()
-  })
+  const api = (path, opts) =>
+    fetch('/api' + path, opts).then(r => {
+      if (!r.ok) return r.json().then(e => Promise.reject(e.detail || r.statusText))
+      return r.json()
+    })
 
   async function load() {
     error = ''
     try {
-      const [s, a, c, m] = await Promise.all([
-        api('/sorties'), api('/aircraft'), api('/aircrew'), api('/metrics')
+      const [s, a, c, m, sch, ch] = await Promise.all([
+        api('/sorties'),
+        api('/aircraft'),
+        api('/aircrew'),
+        api('/metrics'),
+        api('/aircraft/schedule'),
+        api('/changes?limit=12'),
       ])
       live = true
       sorties = s
       aircraft = a
       aircrew = c
+      schedule = sch
+      changes = ch
       metrics = m || summarize(s, a)
     } catch (e) {
       live = false
@@ -36,7 +46,11 @@
   }
 
   async function loadDemoMeta() {
-    try { demoStages = await api('/demo/stages') } catch { /* demo optional */ }
+    try {
+      demoStages = await api('/demo/stages')
+    } catch {
+      /* demo optional */
+    }
   }
 
   async function setTail(sid, tail) {
@@ -45,10 +59,26 @@
       await api(`/sorties/${sid}/aircraft`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tail })
+        body: JSON.stringify({ tail }),
       })
       await load()
-    } catch (e) { error = String(e) }
+    } catch (e) {
+      error = String(e)
+    }
+  }
+
+  async function setSpare(sid, spare_tail) {
+    if (!spare_tail) return
+    try {
+      await api(`/sorties/${sid}/spare`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ spare_tail }),
+      })
+      await load()
+    } catch (e) {
+      error = String(e)
+    }
   }
 
   async function setLoadout(sid, template) {
@@ -57,10 +87,12 @@
       await api(`/sorties/${sid}/loadout`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ template })
+        body: JSON.stringify({ template }),
       })
       await load()
-    } catch (e) { error = String(e) }
+    } catch (e) {
+      error = String(e)
+    }
   }
 
   async function setCrew(sid, position, aircrew_id) {
@@ -69,10 +101,25 @@
       await api(`/sorties/${sid}/crew`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ position, aircrew_id: +aircrew_id })
+        body: JSON.stringify({ position, aircrew_id: +aircrew_id }),
       })
       await load()
-    } catch (e) { error = String(e) }
+    } catch (e) {
+      error = String(e)
+    }
+  }
+
+  async function setEr(sid, signed) {
+    try {
+      await api(`/sorties/${sid}/er`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ signed }),
+      })
+      await load()
+    } catch (e) {
+      error = String(e)
+    }
   }
 
   async function setStatus(sid, status) {
@@ -81,10 +128,12 @@
       await api(`/sorties/${sid}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status })
+        body: JSON.stringify({ status }),
       })
       await load()
-    } catch (e) { error = String(e) }
+    } catch (e) {
+      error = String(e)
+    }
   }
 
   async function applyDemo(stageId) {
@@ -93,7 +142,9 @@
       const r = await api(`/demo/stages/${stageId}`, { method: 'POST' })
       demoNote = r.title
       await load()
-    } catch (e) { error = String(e) }
+    } catch (e) {
+      error = String(e)
+    }
   }
 
   function crewName(s, pos) {
@@ -104,7 +155,14 @@
     return s.takeoff?.slice(11, 16) || '—'
   }
 
-  onMount(() => { load(); loadDemoMeta() })
+  function landOf(s) {
+    return s.land?.slice(11, 16) || '—'
+  }
+
+  onMount(() => {
+    load()
+    loadDemoMeta()
+  })
 </script>
 
 <main>
@@ -154,14 +212,19 @@
         <p class="metric-sub">{metrics.aircraft_available} MC/PMC of {metrics.aircraft_total}</p>
       </article>
       <article class="metric">
+        <p class="metric-label">Spares</p>
+        <p class="metric-value">{metrics.spares_assigned}<span>/{metrics.sorties_total}</span></p>
+        <p class="metric-sub">backup tails named</p>
+      </article>
+      <article class="metric">
         <p class="metric-label">Loadouts</p>
         <p class="metric-value">{metrics.loadouts_applied}<span>/{metrics.sorties_total}</span></p>
         <p class="metric-sub">templates applied</p>
       </article>
       <article class="metric">
-        <p class="metric-label">Crew</p>
-        <p class="metric-value">{metrics.crew_complete}<span>/{metrics.sorties_total}</span></p>
-        <p class="metric-sub">pilot + WSO filled</p>
+        <p class="metric-label">Crew / ER</p>
+        <p class="metric-value">{metrics.crew_complete}<span>/{metrics.er_signed}</span></p>
+        <p class="metric-sub">crewed / ER signed</p>
       </article>
       <article class="metric">
         <p class="metric-label">Airborne</p>
@@ -188,7 +251,7 @@
         <ul>
           {#each metrics.exceptions as ex}
             <li>
-              <span class="when">{ex.takeoff?.slice(11, 16)} {ex.mission}</span>
+              <span class="when">{ex.takeoff?.slice(11, 16)} {ex.callsign || ex.mission}</span>
               <span class="gap">{ex.blockers.join(' · ')}</span>
             </li>
           {/each}
@@ -203,20 +266,33 @@
       <thead>
         <tr>
           <th>Stage</th>
-          <th>Takeoff</th>
+          <th>Line</th>
+          <th>Window</th>
           <th>Mission</th>
-          <th>Tail</th>
+          <th>Primary</th>
+          <th>Spare</th>
           <th>Loadout</th>
           <th>Pilot</th>
           <th>WSO</th>
+          <th>ER</th>
           <th>Status</th>
         </tr>
       </thead>
       <tbody>
         {#each sorties as s}
-          <tr class:airborne={s.status === 'airborne'} class:ready={s.status === 'crew-ready'} class:blocked={s.blockers?.length && s.status === 'planned'}>
-            <td><span class="stage stage-{s.stage}">{STAGE_LABELS[s.stage] || s.stage || '—'}</span></td>
-            <td>{timeOf(s)}</td>
+          <tr
+            class:airborne={s.status === 'airborne'}
+            class:ready={s.status === 'crew-ready'}
+            class:blocked={s.blockers?.length && s.status === 'planned'}
+          >
+            <td>
+              <span class="stage stage-{s.stage}">{STAGE_LABELS[s.stage] || s.stage || '—'}</span>
+            </td>
+            <td>
+              <strong>{s.line_number}</strong>
+              <div class="muted">{s.callsign}</div>
+            </td>
+            <td>{timeOf(s)}–{landOf(s)}</td>
             <td>{s.mission}</td>
             <td>
               <select value={s.tail || ''} onchange={e => setTail(s.id, e.target.value)}>
@@ -227,8 +303,23 @@
               </select>
             </td>
             <td>
+              <select
+                value={s.spare_tail || ''}
+                onchange={e => setSpare(s.id, e.target.value)}
+              >
+                <option value="">—</option>
+                {#each aircraft as a}
+                  <option value={a.tail}>{a.tail} ({a.status})</option>
+                {/each}
+              </select>
+            </td>
+            <td>
               <select value="" onchange={e => setLoadout(s.id, e.target.value)}>
-                <option value="">{s.loadout ? s.loadout.slice(0, 18) + '…' : 'set…'}</option>
+                <option value="">
+                  {s.loadout
+                    ? `${s.loadout_template || 'set'} · ${s.load_crew_minutes || '?'}m`
+                    : 'set…'}
+                </option>
                 <option value="A/A">A/A</option>
                 <option value="A/G">A/G</option>
                 <option value="SEAD">SEAD</option>
@@ -252,7 +343,20 @@
               </select>
             </td>
             <td>
-              <select value={s.status || 'planned'} onchange={e => setStatus(s.id, e.target.value)}>
+              <label class="er">
+                <input
+                  type="checkbox"
+                  checked={!!s.er_signed}
+                  onchange={e => setEr(s.id, e.target.checked)}
+                />
+                ER
+              </label>
+            </td>
+            <td>
+              <select
+                value={s.status || 'planned'}
+                onchange={e => setStatus(s.id, e.target.value)}
+              >
                 {#each STATUSES as st}
                   <option value={st}>{st}</option>
                 {/each}
@@ -263,4 +367,47 @@
       </tbody>
     </table>
   </section>
+
+  {#if schedule.length}
+    <section class="asset-board" aria-label="Aircraft day board">
+      <h2>Aircraft day board</h2>
+      <ul class="assets">
+        {#each schedule as ac}
+          <li>
+            <div class="asset-head">
+              <strong>{ac.tail}</strong>
+              <span>{ac.status} · {ac.config}</span>
+            </div>
+            {#if ac.commitments?.length}
+              <ul>
+                {#each ac.commitments as c}
+                  <li>
+                    {c.role}: {c.callsign || c.mission}
+                    {c.takeoff?.slice(11, 16)}–{c.land?.slice(11, 16)}
+                  </li>
+                {/each}
+              </ul>
+            {:else}
+              <p class="muted">No commitments</p>
+            {/if}
+          </li>
+        {/each}
+      </ul>
+    </section>
+  {/if}
+
+  {#if changes.length}
+    <section class="ink" aria-label="Pen and ink log">
+      <h2>Pen-and-ink</h2>
+      <ul>
+        {#each changes as ch}
+          <li>
+            <span class="when">{ch.at?.slice(11, 19)}</span>
+            <span>L{ch.sortie_id} {ch.field}</span>
+            <span class="muted">{ch.old_value || '—'} → {ch.new_value || '—'}</span>
+          </li>
+        {/each}
+      </ul>
+    </section>
+  {/if}
 </main>

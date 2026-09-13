@@ -1,4 +1,4 @@
-/** Client-side copy of backend/metrics.py so the board can compute locally. */
+/** Client mirror of backend metrics for offline fallback. */
 
 export const STAGE_ORDER = ['planned', 'tail', 'loadout', 'crewed', 'crew-ready', 'airborne']
 
@@ -18,9 +18,11 @@ function hasRole(sortie, role) {
 export function blockers(sortie) {
   const out = []
   if (!sortie.tail) out.push('missing tail')
+  if (!sortie.spare_tail) out.push('missing spare')
   if (!sortie.loadout) out.push('missing loadout')
   if (!hasRole(sortie, 'pilot')) out.push('missing pilot')
   if (!hasRole(sortie, 'wso')) out.push('missing WSO')
+  if (!sortie.er_signed) out.push('missing ER')
   return out
 }
 
@@ -37,6 +39,7 @@ export function annotate(sortie) {
   const s = { ...sortie }
   s.stage = stageOf(s)
   s.blockers = blockers(s)
+  s.hard_blockers = s.blockers.filter(b => b !== 'missing spare')
   s.executable = s.stage === 'crew-ready' || s.stage === 'airborne'
   return s
 }
@@ -46,27 +49,28 @@ export function summarize(sorties, aircraft = []) {
   const total = rows.length
   const funnel = Object.fromEntries(STAGE_ORDER.map(k => [k, 0]))
   for (const r of rows) funnel[r.stage] += 1
-  const tails = rows.filter(r => r.tail).length
-  const loads = rows.filter(r => r.loadout).length
-  const crewed = rows.filter(r => ['crewed', 'crew-ready', 'airborne'].includes(r.stage)).length
-  const executable = rows.filter(r => r.executable).length
   const gap = {}
   for (const r of rows) {
-    if (r.blockers.length) gap[r.blockers[0]] = (gap[r.blockers[0]] || 0) + 1
+    if (r.blockers.length && r.stage !== 'crew-ready' && r.stage !== 'airborne') {
+      gap[r.blockers[0]] = (gap[r.blockers[0]] || 0) + 1
+    }
   }
   const next = Object.keys(gap).length
     ? Object.entries(gap).sort((a, b) => b[1] - a[1])[0][0]
     : 'all lines executable'
   return {
     sorties_total: total,
-    executable,
-    executable_pct: total ? Math.round((100 * executable) / total) : 0,
-    tails_assigned: tails,
-    loadouts_applied: loads,
-    crew_complete: crewed,
+    executable: rows.filter(r => r.executable).length,
+    executable_pct: total ? Math.round((100 * rows.filter(r => r.executable).length) / total) : 0,
+    tails_assigned: rows.filter(r => r.tail).length,
+    spares_assigned: rows.filter(r => r.spare_tail).length,
+    loadouts_applied: rows.filter(r => r.loadout).length,
+    crew_complete: rows.filter(r => ['crewed', 'crew-ready', 'airborne'].includes(r.stage)).length,
+    er_signed: rows.filter(r => r.er_signed).length,
     airborne: funnel.airborne,
     aircraft_available: aircraft.filter(a => a.status === 'MC' || a.status === 'PMC').length,
     aircraft_total: aircraft.length,
+    config_mismatches: rows.filter(r => r.blockers.includes('config mismatch')).length,
     funnel,
     next_action: next,
     exceptions: rows
@@ -74,6 +78,7 @@ export function summarize(sorties, aircraft = []) {
       .map(r => ({
         id: r.id,
         mission: r.mission,
+        callsign: r.callsign,
         takeoff: r.takeoff,
         stage: r.stage,
         blockers: r.blockers,
