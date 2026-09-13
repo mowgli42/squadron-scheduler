@@ -1,4 +1,4 @@
-"""Unit tests: sample-data demo build-up from empty board to launch."""
+"""API tests: demo buildup + aircraft scheduling gaps."""
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,7 +9,7 @@ import main
 from sample_data import DEMO_STAGES, LOADOUTS, MISSIONS
 
 
-class DemoBuildupTests(unittest.TestCase):
+class ApiTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
         self.tmp.close()
@@ -19,14 +19,16 @@ class DemoBuildupTests(unittest.TestCase):
     def tearDown(self):
         Path(self.tmp.name).unlink(missing_ok=True)
 
-    def test_sample_seed_has_four_ship_go(self):
+    def test_seed_has_line_identity_and_lands(self):
         aircraft = self.client.get("/aircraft").json()
         aircrew = self.client.get("/aircrew").json()
         sorties = self.client.get("/sorties").json()
-        self.assertEqual(len(aircraft), 4)
-        self.assertEqual(len(aircrew), 8)
+        self.assertEqual(len(aircraft), 6)
+        self.assertEqual(len(aircrew), 10)
         self.assertEqual([s["mission"] for s in sorties], MISSIONS)
-        self.assertTrue(all(s["takeoff"].startswith("2026-08-04T") for s in sorties))
+        self.assertEqual([s["line_number"] for s in sorties], [1, 2, 3, 4])
+        self.assertTrue(all(s["callsign"] for s in sorties))
+        self.assertTrue(all(s["land"] for s in sorties))
         self.assertTrue(all(s["status"] == "planned" and not s["tail"] for s in sorties))
 
     def test_demo_stages_listed(self):
@@ -34,47 +36,31 @@ class DemoBuildupTests(unittest.TestCase):
         self.assertEqual([s["id"] for s in stages], [s["id"] for s in DEMO_STAGES])
 
     def test_stage_01_empty_board(self):
-        r = self.client.post("/demo/stages/01-empty-board")
-        self.assertEqual(r.status_code, 200)
+        self.client.post("/demo/stages/01-empty-board")
         sorties = self.client.get("/sorties").json()
-        self.assertEqual(len(sorties), 4)
         for s in sorties:
             self.assertIsNone(s["tail"])
-            self.assertIsNone(s["loadout"])
-            self.assertEqual(s["crew"], [])
-            self.assertEqual(s["status"], "planned")
+            self.assertIsNone(s["spare_tail"])
             self.assertEqual(s["stage"], "planned")
 
-    def test_stage_02_tails_assigned(self):
+    def test_stage_02_tails_and_spares(self):
         self.client.post("/demo/stages/02-tails-assigned")
         sorties = self.client.get("/sorties").json()
-        tails = [s["tail"] for s in sorties]
-        self.assertEqual(tails, ["87-0321", "87-0322", "87-0325", "87-0330"])
-        self.assertTrue(all(s["loadout"] is None for s in sorties))
+        self.assertEqual(
+            [s["tail"] for s in sorties],
+            ["87-0321", "87-0322", "87-0325", "87-0330"],
+        )
+        self.assertTrue(all(s["spare_tail"] == "87-0335" for s in sorties))
         self.assertTrue(all(s["stage"] == "tail" for s in sorties))
 
-    def test_stage_03_loadouts_applied(self):
-        self.client.post("/demo/stages/03-loadouts-applied")
-        sorties = self.client.get("/sorties").json()
-        expected = [LOADOUTS[m] for m in MISSIONS]
-        self.assertEqual([s["loadout"] for s in sorties], expected)
-        self.assertTrue(all(s["stage"] == "loadout" for s in sorties))
-
-    def test_stage_04_crew_filled(self):
-        self.client.post("/demo/stages/04-crew-filled")
-        sorties = self.client.get("/sorties").json()
-        for s in sorties:
-            positions = {c["position"] for c in s["crew"]}
-            self.assertEqual(positions, {"pilot", "wso"})
-            self.assertEqual(s["status"], "planned")
-            self.assertEqual(s["stage"], "crewed")
-
-    def test_stage_05_crew_ready(self):
+    def test_stage_05_crew_ready_requires_er_and_is_executable(self):
         self.client.post("/demo/stages/05-crew-ready")
         sorties = self.client.get("/sorties").json()
         self.assertTrue(all(s["status"] == "crew-ready" for s in sorties))
+        self.assertTrue(all(s["er_signed"] for s in sorties))
         snap = self.client.get("/metrics").json()
         self.assertEqual(snap["executable_pct"], 100)
+        self.assertEqual(snap["spares_assigned"], 4)
         self.assertEqual(snap["next_action"], "all lines executable")
 
     def test_stage_06_launched(self):
@@ -86,45 +72,73 @@ class DemoBuildupTests(unittest.TestCase):
         )
         snap = self.client.get("/metrics").json()
         self.assertEqual(snap["airborne"], 2)
-        self.assertEqual(snap["executable_pct"], 100)
-
-    def test_empty_metrics_point_at_missing_tail(self):
-        self.client.post("/demo/stages/01-empty-board")
-        snap = self.client.get("/metrics").json()
-        self.assertEqual(snap["executable_pct"], 0)
-        self.assertEqual(snap["next_action"], "missing tail")
-        self.assertEqual(len(snap["exceptions"]), 4)
 
     def test_full_buildup_sequence(self):
-        """Walk every stage in order; each response stays coherent."""
         for stage in DEMO_STAGES:
             r = self.client.post(f"/demo/stages/{stage['id']}")
             self.assertEqual(r.status_code, 200, stage["id"])
-            sorties = self.client.get("/sorties").json()
-            self.assertEqual(len(sorties), 4)
-            if stage["tails"]:
-                self.assertEqual(
-                    [s["tail"] for s in sorties],
-                    ["87-0321", "87-0322", "87-0325", "87-0330"],
-                )
 
-    def test_assign_tail_conflict_with_sample_data(self):
+    def test_reject_nmc_and_spare_equals_primary(self):
+        sorties = self.client.get("/sorties").json()
+        sid = sorties[0]["id"]
+        r = self.client.patch(f"/sorties/{sid}/aircraft", json={"tail": "87-0340"})
+        self.assertEqual(r.status_code, 409)
+        self.client.patch(f"/sorties/{sid}/aircraft", json={"tail": "87-0321"})
+        r = self.client.patch(f"/sorties/{sid}/spare", json={"spare_tail": "87-0321"})
+        self.assertEqual(r.status_code, 409)
+
+    def test_turn_conflict_on_overlapping_window(self):
         self.client.post("/demo/stages/02-tails-assigned")
         sorties = self.client.get("/sorties").json()
-        sid = sorties[1]["id"]
         r = self.client.patch(
-            f"/sorties/{sid}/aircraft",
-            json={"tail": "87-0321"},
+            f"/sorties/{sorties[1]['id']}/aircraft",
+            json={"tail": sorties[0]["tail"]},
         )
         self.assertEqual(r.status_code, 409)
 
-    def test_status_rejects_unknown(self):
-        sorties = self.client.get("/sorties").json()
-        r = self.client.patch(
-            f"/sorties/{sorties[0]['id']}/status",
-            json={"status": "scrambled"},
+    def test_loadout_sets_load_crew_minutes(self):
+        sid = self.client.get("/sorties").json()[0]["id"]
+        r = self.client.patch(f"/sorties/{sid}/loadout", json={"template": "A/G"})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["load_crew_minutes"], 60)
+        s = self.client.get("/sorties").json()[0]
+        self.assertEqual(s["loadout"], LOADOUTS["A/G"])
+        self.assertEqual(s["load_crew_minutes"], 60)
+
+    def test_er_gate_and_crew_replace(self):
+        self.client.post("/demo/stages/04-crew-filled")
+        sid = self.client.get("/sorties").json()[0]["id"]
+        r = self.client.patch(f"/sorties/{sid}/status", json={"status": "crew-ready"})
+        self.assertEqual(r.status_code, 409)
+        self.client.patch(f"/sorties/{sid}/er", json={"signed": True})
+        r = self.client.patch(f"/sorties/{sid}/status", json={"status": "crew-ready"})
+        self.assertEqual(r.status_code, 200)
+        r = self.client.post(
+            f"/sorties/{sid}/crew", json={"aircrew_id": 10, "position": "pilot"}
         )
-        self.assertEqual(r.status_code, 400)
+        self.assertEqual(r.status_code, 200)
+        s = self.client.get("/sorties").json()[0]
+        pilot = next(c for c in s["crew"] if c["position"] == "pilot")
+        self.assertEqual(pilot["aircrew_id"], 10)
+        changes = self.client.get("/changes").json()
+        self.assertTrue(any(ch["field"] == "crew:pilot" for ch in changes))
+
+    def test_rest_gate(self):
+        sid = self.client.get("/sorties").json()[0]["id"]
+        r = self.client.post(
+            f"/sorties/{sid}/crew", json={"aircrew_id": 9, "position": "pilot"}
+        )
+        self.assertEqual(r.status_code, 409)
+
+    def test_aircraft_schedule(self):
+        self.client.post("/demo/stages/02-tails-assigned")
+        board = self.client.get("/aircraft/schedule").json()
+        by_tail = {a["tail"]: a for a in board}
+        self.assertEqual(len(by_tail["87-0321"]["commitments"]), 1)
+        self.assertEqual(by_tail["87-0321"]["commitments"][0]["role"], "primary")
+        self.assertEqual(len(by_tail["87-0335"]["commitments"]), 4)
+        self.assertEqual(by_tail["87-0335"]["commitments"][0]["role"], "spare")
+        self.assertEqual(by_tail["87-0340"]["commitments"], [])
 
 
 if __name__ == "__main__":

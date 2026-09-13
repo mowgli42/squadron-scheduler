@@ -1,19 +1,29 @@
-# Squadron Scheduler 2.0
+# Squadron Scheduler 2.1
 
-Process-aware flying schedule for a squadron desk: **aircraft tails**, **loadouts**, and **crew**, with readiness metrics.
+Process-aware flying schedule for a squadron desk: **aircraft tails** (primary + spare), **loadouts**, **crew**, **ER**, and readiness metrics.
 
-The primary question on the screen is **Can we generate today’s go?**
+The primary question on the screen is **Can we generate today’s go?**  
 The primary number is **executable %** (lines that are crew-ready or airborne).
 
 **Stack:** Svelte 5 + FastAPI + SQLite  
-**Method:** graham-bell prototype (OpenSpec + Gherkin + beads + tests). Ponytail is the later compression pass, not this slice.
+**Method:** graham-bell prototype (OpenSpec + Gherkin + beads + tests).
 
-## What 2.0 added
+## What 2.1 closed (aircraft scheduling gaps)
 
-- Derived process stages: planned → tail → loadout → crewed → crew-ready → airborne
-- `GET /metrics` — executable %, funnel counts, next action, exceptions
-- IxDF decision-first layout: question, metric band, process funnel, exception list, then the board
-- See [`LEARNINGS.md`](LEARNINGS.md) and [`DEMO.md`](DEMO.md)
+Critical review: [`docs/CRITICAL-REVIEW.md`](docs/CRITICAL-REVIEW.md)
+
+| Gap | Closure |
+| --- | --- |
+| No land / turn windows | `land` + turn-buffer conflicts |
+| No spare tail | `spare_tail` + spare ≠ primary |
+| Config ignored | config mismatch blockers |
+| No aircraft day view | `GET /aircraft/schedule` |
+| Thin line identity | `line_number` + `callsign` |
+| No load-crew estimate | minutes from template |
+| Unsigned crew-ready | ER gate before crew-ready |
+| Dead `rest_until` | rest gate on assign |
+| Crew stuck after first assign | upsert replace + pen-and-ink |
+| No change log | `GET /changes` |
 
 ## Demo — morning go (build-up → launch)
 
@@ -22,14 +32,11 @@ Four-ship sample day (`2026-08-04`). Click **01–06** under Replay process, or 
 | Stage | What you see |
 | --- | --- |
 | 01 Empty board | Sorties planned; executable 0%; next action = missing tail |
-| 02 Tails | Primary aircraft on each line |
-| 03 Loadouts | A/A · A/G · A/A · SEAD templates |
-| 04 Crew | Pilot + WSO on every jet; still not executable |
-| 05 Crew-ready | Executable 100% |
+| 02 Tails | Primary + ground spare on each line |
+| 03 Loadouts | A/A · A/G · A/A · SEAD + load-crew minutes |
+| 04 Crew | Pilot + WSO; still not executable (ER missing) |
+| 05 Crew-ready | ER signed; executable 100% |
 | 06 Launch | Lead elements airborne |
-
-Sample data + stages: [`backend/sample_data.py`](backend/sample_data.py)  
-Unit tests: `cd backend && python -m unittest test_metrics test_buildup -v`
 
 ## Architecture
 
@@ -38,14 +45,20 @@ flowchart LR
   UI["Svelte dashboard<br/>Vite :5173"]
   API["FastAPI<br/>:8000"]
   DB[(SQLite)]
+  R["aircraft_rules.py<br/>windows + config"]
   M["metrics.py<br/>stage + snapshot"]
 
   UI -->|"/api/*"| API
   API --> DB
+  API --> R
   API --> M
 ```
 
-Spec & tracking: [`openspec/squadron-scheduler.feature`](openspec/squadron-scheduler.feature) · [`beads/BEADS.md`](beads/BEADS.md)
+Spec & tracking:
+
+- OpenSpec: [`openspec/`](openspec/) · Gherkin: [`features/`](features/)
+- Beads: [`beads/BEADS.md`](beads/BEADS.md) · `bd ready`
+- Workflow: [`openspec/WORKFLOW.md`](openspec/WORKFLOW.md)
 
 ## Quick start
 
@@ -62,8 +75,6 @@ npm i
 npm run dev
 ```
 
-## Remaining
+## Remaining (production beads P1–P6)
 
-Shipped: assignment, conflicts, demo 01–06, process stages, metrics dashboard.
-
-Not in this prototype: auth, live MX feed, RAP/rest engine, ER signature, pen-and-ink log, hosted API. Those live as production beads P1–P8.
+Not in this prototype: durable multi-user store, explicit state machine, auth/tenancy, live MX feed, full RAP engine, hosted demo.

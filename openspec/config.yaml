@@ -1,0 +1,9 @@
+schema: spec-driven
+
+context: |
+  Squadron Scheduler: process-aware flying schedule for a squadron desk.
+  Stack: Svelte 5 + Vite, FastAPI, SQLite.
+  Method: graham-bell (OpenSpec + Gherkin + beads + tests). Ponytail later.
+  Primary question: Can we generate today's go?
+  Primary metric: executable % (crew-ready or airborne with ER).
+  See openspec/project.md, docs/CRITICAL-REVIEW.md, openspec/WORKFLOW.md.
