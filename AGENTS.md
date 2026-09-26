@@ -49,3 +49,7 @@ Demo: click **01–06** under Replay process, or `POST /demo/stages/{id}`.
 - Learnings: `LEARNINGS.md`
 
 Patterns borrowed (ossrules): hard prohibitions + verification-by-change-type + house vocabulary + single source of truth. Keep this file short.
+
+## Secrets
+
+Do not commit private keys, *-key.pem, *.key, .env secrets, or BEGIN … PRIVATE KEY. Generate locally; gitignore keys.
